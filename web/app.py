@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field                        # noqa: E402
 from src.analyze import analyze_stock, is_local_base_url, make_llm_call  # noqa: E402
 from src.calendar import today_cn                             # noqa: E402
 from src.config import ConfigError, load_config, parse_stock_list  # noqa: E402
-from src.fetch_news import fetch_all                          # noqa: E402
+from src.fetch_news import NEWS_SKIPPED_NOTE, fetch_all, news_configured  # noqa: E402
 from src.fetch_quote import get_quote                        # noqa: E402
 from src.format_report import DISCLAIMER, format_brief, format_demo_brief  # noqa: E402
 from src.models import Quote, StockBrief                     # noqa: E402
@@ -95,14 +95,6 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _require_operator_config(local_demo: bool) -> None:
-    if local_demo:
-        return  # 本机演示用固定样本原文，不消耗运营方数据额度
-    config = load_config()  # 会读取服务端 .env，不触碰用户 Key
-    if not config.tavily_api_key:
-        raise HTTPException(503, "数据通道尚未配置（由运营方提供），请稍后再试；下方的示例简报仍可查看。")
-
-
 def _scrub(text: str, secret: str) -> str:
     return text.replace(secret, "***") if secret else text
 
@@ -144,7 +136,7 @@ async def create_brief(payload: BriefRequest, request: Request) -> JSONResponse:
             validate_demo_codes(codes)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-    _require_operator_config(demo_mode)
+    # 公告走巨潮，不需要任何 Key；新闻未配置只在简报里标注，不再整体拒绝服务。
 
     base_url, model = payload.base_url.strip(), payload.model.strip()
     local_model = is_local_base_url(base_url)
@@ -180,7 +172,12 @@ async def create_brief(payload: BriefRequest, request: Request) -> JSONResponse:
             except Exception as exc:  # 逐条写进简报 = 失败可见
                 errors[code] = f"{type(exc).__name__}: {exc}"
         report = format_brief(today_cn(), quotes, briefs, errors)
-        return LOCAL_DEMO_BANNER + "\n\n" + report if demo_mode else report
+        if demo_mode:
+            return LOCAL_DEMO_BANNER + "\n\n" + report
+        if not news_configured():
+            # 公告走巨潮、无需任何 Key；新闻未配置时明确标注，不假装简报是完整的。
+            report = report + "\n\n⚠️ " + NEWS_SKIPPED_NOTE
+        return report
 
     try:
         report = await asyncio.wait_for(asyncio.to_thread(_build), timeout=TOTAL_TIMEOUT)

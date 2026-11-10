@@ -106,6 +106,10 @@ class TestNewsCache(unittest.TestCase):
 
     def setUp(self):
         fetch_news._cached_search.cache_clear()
+        # 新闻通道视为已配置，专门测「已配置」这条路径
+        self._env = patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
 
     def tearDown(self):
         fetch_news._cached_search.cache_clear()
@@ -146,6 +150,24 @@ class TestNewsCache(unittest.TestCase):
                 self.assertRaises(NewsFetchError) as ctx:
             fetch_news._get_client()
         self.assertIn("运营方", str(ctx.exception))
+
+    def test_unconfigured_news_channel_only_skips_news(self):
+        """新闻没配 Key 是「已知状态」，不是异常：只跳过新闻，公告照常返回。"""
+        client = FakeClient()
+        with patch.dict("os.environ", {}, clear=True), \
+                patch("src.fetch_news.fetch_announcements", _fake_announcements), \
+                patch("src.fetch_news._get_client", lambda: client):
+            items = fetch_news.fetch_all("688981", "中芯国际")
+        self.assertEqual(client.queries, [])  # 完全没有发起检索
+        self.assertEqual([item.category for item in items], ["announcement"])
+
+    def test_news_configured_flag_follows_env(self):
+        with patch.dict("os.environ", {"TAVILY_API_KEY": "x"}):
+            self.assertTrue(fetch_news.news_configured())
+        with patch.dict("os.environ", {"TAVILY_API_KEY": "  "}):
+            self.assertFalse(fetch_news.news_configured())
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(fetch_news.news_configured())
 
 
 if __name__ == "__main__":

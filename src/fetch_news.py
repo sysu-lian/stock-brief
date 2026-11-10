@@ -5,8 +5,11 @@
 - **公告**：`fetch_announcements.py` 直连巨潮结构化接口，拿到交易所披露原文 PDF，
   解决骨架阶段「Tavily 站点限定检索召回率低」这个最大功能短板。
 - **新闻**：仍由运营方的 Tavily Key 检索，主流财经站点限定，Key 只在服务端。
-- **任一通道异常直接抛出，不互相 fallback**：失败必须可见，绝不静默降级成
+  新闻通道**未配置**时只跳过新闻并给出显式说明（NEWS_SKIPPED_NOTE），
+  因为公告走巨潮不需要任何 Key，站点不该因为「没买新闻额度」就整体不可用。
+- **通道异常仍然直接抛出，不互相 fallback**：失败必须可见，绝不静默降级成
   「用弱一点的源凑合」，那会把「公告没抓到」伪装成「没有公告」。
+  「未配置」是已知状态，「抓取失败」是异常——两者不能混为一谈。
 """
 from __future__ import annotations
 
@@ -20,9 +23,16 @@ from .models import NewsItem
 NEWS_SITES = "site:eastmoney.com OR site:cls.cn OR site:stcn.com"
 MAX_RESULTS = 5
 
+NEWS_SKIPPED_NOTE = "新闻通道未配置（运营方未提供检索 Key），本次简报只含交易所公告原文。"
+
 
 class NewsFetchError(Exception):
     """检索失败。必须上报，不允许静默跳过。"""
+
+
+def news_configured() -> bool:
+    """新闻通道是否已配置。公告走巨潮，不需要任何 Key。"""
+    return bool(os.getenv("TAVILY_API_KEY", "").strip())
 
 
 def _get_client():
@@ -67,9 +77,17 @@ def fetch_news(code: str, name: str) -> tuple[NewsItem, ...]:
 
 
 def fetch_all(code: str, name: str) -> tuple[NewsItem, ...]:
-    """公告（巨潮）+ 新闻（Tavily）合并去重。任一通道异常直接抛出，不互相 fallback。"""
+    """
+    公告（巨潮）+ 新闻（Tavily）合并去重。
+
+    - 公告失败 → 抛出（抓不到不能当成「没有公告」）。
+    - 新闻未配置 → 跳过，只返回公告；调用方负责把 NEWS_SKIPPED_NOTE 显示出来。
+    - 新闻已配置但失败 → 抛出（这是异常，不是已知状态）。
+    """
     announcements = fetch_announcements(code, name)
-    news = fetch_news(code, name)
+    news: tuple[NewsItem, ...] = ()
+    if news_configured():
+        news = fetch_news(code, name)
     seen: set[str] = set()
     merged: list[NewsItem] = []
     for item in (*announcements, *news):
