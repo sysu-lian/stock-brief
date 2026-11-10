@@ -61,7 +61,9 @@ def format_brief(day: date, quotes: dict[str, Quote],
             lines.append(f"  摘要：{brief.summary}")  # 已降级为「信息不足」
             lines.append(f"  原因：{brief.warnings[-1] if brief.warnings else '校验未通过'}")
         elif not brief.has_important_event:
-            lines.append("  无重要事项")
+            # 没有值得知道的事：把「搜过了确实没有」和「模型判断不重要」说清楚
+            note = brief.warnings[-1] if brief.warnings else ""
+            lines.append("  无重要事项" + (f"（{note}）" if note else ""))
         else:
             lines.append(f"  摘要：{brief.summary}")
             lines.append(f"  信息提示：{brief.risk_alert or '无'}")

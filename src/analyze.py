@@ -204,7 +204,18 @@ def validate_llm_output(raw: dict | str, items: Sequence[NewsItem],
 
 def analyze_stock(code: str, name: str, items: Sequence[NewsItem],
                   llm_call: Callable[[list[dict]], str], *, retries: int = 1) -> StockBrief:
-    """编排：组 prompt → 调模型 → 解析 JSON（失败重试 1 次）→ 硬校验。"""
+    """编排：组 prompt → 调模型 → 解析 JSON（失败重试 1 次）→ 硬校验。
+
+    本次窗口内一条原文都没有时**不调模型**，直接给「没有公告」这个结论。
+    这不是降级：搜过了、确实没有，本身就是一个可交付的答案；
+    而让模型在零原文的情况下作答才是我们要防的事。
+    """
+    if not items:
+        return StockBrief(
+            code=code, name=name, has_important_event=False, summary="",
+            risk_alert=None, sources=[], degraded=False,
+            warnings=["本次检索窗口内没有公告或新闻"],
+        )
     messages = build_messages(code, name, items)
     last_error: AnalyzeError | None = None
     for attempt in range(retries + 1):

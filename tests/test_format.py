@@ -46,6 +46,15 @@ class TestFormat(unittest.TestCase):
                                              has_important_event=False)}, {})
         self.assertIn("无重要事项", text)
 
+    def test_empty_window_says_why_instead_of_pretending(self):
+        """「搜过了确实没有」要把原因写出来，不能只是一句干巴巴的无重要事项。"""
+        empty = brief("688981", "中芯国际", has_important_event=False,
+                      warnings=["本次检索窗口内没有公告或新闻"])
+        text = format_brief(DAY, {"688981": quote("688981", "中芯国际", -1.16)},
+                            {"688981": empty}, {})
+        self.assertIn("无重要事项", text)
+        self.assertIn("本次检索窗口内没有公告或新闻", text)
+
     def test_sources_are_printed(self):
         text = format_brief(DAY, {"600519": quote("600519", "贵州茅台", 1.2)},
                             {"600519": brief("600519", "贵州茅台")}, {})

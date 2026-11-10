@@ -170,6 +170,22 @@ class TestPromptAndRetry(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             analyze_stock("688981", "中芯国际", items(), exploding)
 
+    def test_empty_items_never_calls_model(self):
+        """零原文是「搜过了没有」，不是「让模型猜」——模型一次都不能被调用。"""
+        calls = []
+
+        def should_not_run(_messages):
+            calls.append(1)
+            return json.dumps(good_raw())
+
+        brief = analyze_stock("688981", "中芯国际", [], should_not_run)
+        self.assertEqual(calls, [])
+        self.assertFalse(brief.degraded)  # 不是降级，是一个正常结论
+        self.assertFalse(brief.has_important_event)
+        self.assertEqual(brief.summary, "")
+        self.assertEqual(brief.sources, [])
+        self.assertIn("没有公告或新闻", brief.warnings[-1])
+
 
 if __name__ == "__main__":
     unittest.main()
