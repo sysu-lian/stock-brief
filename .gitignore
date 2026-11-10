@@ -1,0 +1,21 @@
+# 密钥与本地配置：绝不入库
+.env
+.env.*
+!.env.example
+
+# 本地运行环境
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 运行产物
+*.log
+.DS_Store
+
+# WorkBuddy 内部记忆/工作数据（含本机路径，不对外）
+.workbuddy-ai/

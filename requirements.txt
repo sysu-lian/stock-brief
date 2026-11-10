@@ -1,0 +1,13 @@
+# 运行时依赖（6 个）。发布前请用 pip freeze 固定到实测通过的精确版本，
+# 尤其是 akshare —— 它的接口列名变动会直接影响行情抓取。
+akshare>=1.14,<2
+tavily-python>=0.5,<1
+pypdf>=5,<8
+requests>=2.31,<3
+fastapi>=0.110,<1
+uvicorn>=0.29,<1
+
+# 说明：.env 解析与大模型 HTTP 调用都用标准库实现，
+# 不需要 python-dotenv / openai SDK；测试用标准库 unittest，不需要 pytest。
+# 因此核心引擎（prompt → JSON → 硬校验 → 简报）零第三方依赖即可运行，
+# 包括对接本机 WorkBuddy / llama.cpp / Ollama 的 OpenAI 兼容端点。

@@ -1,0 +1,47 @@
+name: daily-brief
+
+on:
+  schedule:
+    # GitHub Actions cron 用 UTC：10:00 UTC = 北京 18:00（交易日收盘后）。
+    # 只写周一到周五不够 —— 法定节假日/调休由 src/calendar.py 的交易日历兜底。
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Generate and push brief
+        id: brief
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          STOCK_LIST: ${{ vars.STOCK_LIST }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: python -m src.main
+
+      - name: Watchdog (never fail silently)
+        if: always() && steps.brief.outcome == 'failure'
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          if [ -n "$WECOM_WEBHOOK" ]; then
+            curl -sS -X POST "$WECOM_WEBHOOK" \
+              -H 'Content-Type: application/json' \
+              -d '{"msgtype":"text","text":{"content":"⚠️ stock-brief 定时任务执行失败，请查看 GitHub Actions 日志。"}}'
+          fi
+          exit 1
