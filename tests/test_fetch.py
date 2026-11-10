@@ -10,8 +10,8 @@ from unittest.mock import patch
 from src import fetch_news, fetch_quote
 from src.fetch_announcements import AnnouncementFetchError
 from src.fetch_news import NewsFetchError
-from src.fetch_quote import FetchError
 from src.models import NewsItem
+from tests.test_quote import FakeHist, FakePairs
 
 FIXED_DAY = date(2026, 11, 10)
 
@@ -21,18 +21,6 @@ def _fake_announcements(code: str, name: str) -> tuple[NewsItem, ...]:
     return (NewsItem(url="https://static.cninfo.com.cn/finalpage/2026-11-10/1.PDF",
                      title="三季度报告", content="2026-11-10 三季度报告",
                      category="announcement"),)
-
-
-class FakeFrame:
-    empty = False
-
-    def to_dict(self, orient="records"):
-        return [
-            {"代码": "688981", "名称": "中芯国际", "最新价": "95.2",
-             "涨跌幅": "1.2", "成交量": "123456"},
-            {"代码": "600519", "名称": "贵州茅台", "最新价": "1500.0",
-             "涨跌幅": "-0.3", "成交量": "999"},
-        ]
 
 
 class FakeClient:
@@ -55,42 +43,63 @@ class BrokenClient:
         raise RuntimeError("额度用尽")
 
 
-class TestQuoteCache(unittest.TestCase):
+class TestQuoteAgainstFakeAkshare(unittest.TestCase):
+    """校验我们调的 akshare 函数名与入参没变；接口一旦改名，这里先炸。"""
 
     def setUp(self):
-        fetch_quote._load_spot.cache_clear()
+        fetch_quote._fetch_fields.cache_clear()
+        self.calls: list[tuple[str, str]] = []
 
     def tearDown(self):
-        fetch_quote._load_spot.cache_clear()
+        fetch_quote._fetch_fields.cache_clear()
 
-    def _fake_akshare(self, calls):
-        def spot():
-            calls.append(1)
-            return FakeFrame()
-        return types.SimpleNamespace(stock_zh_a_spot_em=spot)
+    def _fake_akshare(self):
+        calls = self.calls
 
-    def test_many_codes_only_one_request_per_day(self):
-        calls: list[int] = []
-        with patch.dict(sys.modules, {"akshare": self._fake_akshare(calls)}):
-            smic = fetch_quote.get_quote("688981", day="2026-11-10")
-            moutai = fetch_quote.get_quote("600519", day="2026-11-10")
-        self.assertEqual(len(calls), 1)  # 全局缓存，只抓一次
-        self.assertEqual(smic.name, "中芯国际")
-        self.assertEqual(smic.change_pct, 1.2)
-        self.assertEqual(moutai.change_pct, -0.3)
+        def bid_ask(symbol):
+            calls.append(("bid_ask", symbol))
+            return FakePairs({"最新": 107.75, "涨幅": -1.16, "总手": 255418})
+
+        def hist(symbol, period, start_date, end_date, adjust):
+            calls.append(("hist", symbol))
+            return FakeHist([{"收盘": 107.75, "涨跌幅": -1.16, "成交量": 255418}])
+
+        def info(symbol):
+            calls.append(("info", symbol))
+            return FakePairs({"股票简称": "中芯国际"})
+
+        return types.SimpleNamespace(
+            stock_bid_ask_em=bid_ask,
+            stock_zh_a_hist=hist,
+            stock_individual_info_em=info,
+        )
+
+    def test_calls_expected_akshare_functions(self):
+        with patch.dict(sys.modules, {"akshare": self._fake_akshare()}):
+            quote = fetch_quote.get_quote("688981", day="2026-11-10")
+        self.assertEqual(quote.name, "中芯国际")
+        self.assertAlmostEqual(quote.change_pct, -1.16)
+        self.assertIn(("bid_ask", "688981"), self.calls)
+        self.assertIn(("info", "688981"), self.calls)
 
     def test_cache_expires_across_days(self):
-        calls: list[int] = []
-        with patch.dict(sys.modules, {"akshare": self._fake_akshare(calls)}):
+        with patch.dict(sys.modules, {"akshare": self._fake_akshare()}):
             fetch_quote.get_quote("688981", day="2026-11-10")
             fetch_quote.get_quote("688981", day="2026-11-11")
-        self.assertEqual(len(calls), 2)  # 站点长期运行不会返回昨天的行情
+        # 站点长期运行不会返回昨天的行情
+        self.assertEqual(len([c for c in self.calls if c[0] == "bid_ask"]), 2)
 
-    def test_unknown_code_raises(self):
-        calls: list[int] = []
-        with patch.dict(sys.modules, {"akshare": self._fake_akshare(calls)}), \
-                self.assertRaises(FetchError):
-            fetch_quote.get_quote("000000", day="2026-11-10")
+    def test_falls_back_to_hist_when_bid_ask_breaks(self):
+        fake = self._fake_akshare()
+
+        def boom(symbol):
+            raise RuntimeError("盘口挂了")
+
+        fake.stock_bid_ask_em = boom
+        with patch.dict(sys.modules, {"akshare": fake}):
+            quote = fetch_quote.get_quote("688981", day="2026-11-10")
+        self.assertAlmostEqual(quote.price, 107.75)
+        self.assertIn(("hist", "688981"), self.calls)
 
 
 class TestNewsCache(unittest.TestCase):
