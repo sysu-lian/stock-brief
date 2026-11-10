@@ -78,8 +78,14 @@ class TestFormat(unittest.TestCase):
 
     def test_demo_snapshot_is_explicitly_labelled(self):
         text = format_demo_brief()
-        for token in ("中芯国际", "688981", "演示", "不构成任何推荐", "不构成任何投资建议"):
+        for token in ("中芯国际", "688981", "真实", "不是实时行情", "不构成任何投资建议"):
             self.assertIn(token, text)
+
+    def test_demo_snapshot_cites_a_real_source_not_a_placeholder(self):
+        text = format_demo_brief()
+        self.assertIn("https://static.cninfo.com.cn/finalpage/", text)
+        self.assertNotIn("占位", text)
+        self.assertNotIn("演示占位链接", text)
 
 
 if __name__ == "__main__":
